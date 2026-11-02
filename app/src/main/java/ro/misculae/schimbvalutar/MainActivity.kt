@@ -48,9 +48,9 @@ private fun ExchangeApp() {
             message = "Se preiau cursurile BNR…"
             try {
                 val pair = withContext(Dispatchers.IO) { fetchBnr() }
-                bnr = pair.first.filter { it.code in setOf("USD", "EUR", "GBP", "XAU") }
+                bnr = pair.first.filter { it.code in setOf("USD", "EUR", "GBP") }
                 bnrDate = pair.second
-                val missing = listOf("USD", "EUR", "GBP", "XAU").filter { code -> bnr.none { it.code == code } }
+                val missing = listOf("USD", "EUR", "GBP").filter { code -> bnr.none { it.code == code } }
                 message = if (missing.isEmpty()) "Cursurile au fost actualizate automat." else "BNR nu a publicat în acest feed: ${missing.joinToString()}"
             } catch (e: Exception) {
                 message = "Eroare BNR: ${e.localizedMessage ?: e.javaClass.simpleName}"
@@ -81,7 +81,7 @@ private fun ExchangeApp() {
                 SectionTitle("CONVERTOR VALUTAR")
                 Text("Alege valuta")
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("USD", "EUR", "GBP", "XAU").forEach { code ->
+                    listOf("USD", "EUR", "GBP").forEach { code ->
                         FilterChip(
                             selected = selected == code,
                             onClick = { selected = code },
@@ -89,7 +89,7 @@ private fun ExchangeApp() {
                         )
                     }
                 }
-                NumberField(if (selected == "XAU") "Cantitate în grame" else "Suma în $selected", amount) { amount = it }
+                NumberField("Suma în $selected", amount) { amount = it }
                 Text(
                     when (selected) {
                         "XAU" -> "1 gram aur (BNR)"
@@ -119,13 +119,13 @@ private fun ExchangeApp() {
                 }
                 Text(message, style = MaterialTheme.typography.bodySmall)
             }
-            items(listOf("USD", "EUR", "GBP", "XAU")) { code ->
+            items(listOf("USD", "EUR", "GBP")) { code ->
                 val rate = bnr.firstOrNull { it.code == code }
                 Card(Modifier.fillMaxWidth()) {
                     Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                         Column {
-                            Text(if (code == "XAU") "Aur – gram" else code, fontWeight = FontWeight.SemiBold)
-                            Text(if (code == "XAU") "Preț oficial gram aur" else "Curs oficial BNR")
+                            Text(code, fontWeight = FontWeight.SemiBold)
+                            Text("Curs oficial BNR")
                         }
                         Text(
                             rate?.let { String.format(Locale.US, "%.4f RON", it.value) } ?: "—",
