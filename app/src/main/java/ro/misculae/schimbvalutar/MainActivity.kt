@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
+import java.net.HttpURLConnection
 import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -29,7 +30,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private data class Quote(val name: String, val rate: Double, val feeUsd: Double, val note: String)
 private data class BnrRate(val code: String, val value: Double)
 
 @Composable
@@ -92,7 +92,7 @@ private fun ExchangeApp() {
             }
             item {
                 SectionTitle("CURS OFICIAL BNR")
-                Text("Sursa: curs.bnr.ro · curs de referință, nu ofertă garantată de schimb.")
+                Text("Sursa oficială: curs.bnr.ro · curs de referință, nu ofertă garantată de schimb.")
                 Text("Data: $bnrDate")
                 Button(onClick = {
                     scope.launch {
@@ -103,7 +103,7 @@ private fun ExchangeApp() {
                             bnrDate = pair.second
                             message = "Curs BNR actualizat. Cotațiile comerciale se verifică separat."
                         } catch (e: Exception) {
-                            message = "Nu am putut prelua BNR: ${e.localizedMessage ?: "eroare de conexiune"}"
+                            message = "Eroare BNR: ${e.localizedMessage ?: e.javaClass.simpleName}"
                         }
                     }
                 }) { Text("ACTUALIZEAZĂ CURS BNR") }
@@ -116,7 +116,7 @@ private fun ExchangeApp() {
             }
             item {
                 SectionTitle("SURSE ȘI VERIFICĂRI")
-                Text("• BNR: curs oficial XML – curs.bnr.ro")
+                Text("• BNR: XML oficial – https://curs.bnr.ro/nbrfxrates.xml")
                 Text("• Bănci: verifică rubrica «cumpărare USD»; condițiile pot depinde de pachet și canal.")
                 Text("• Case de schimb: Valutare.ro – confirmă telefonic cursul, suma acceptată și existența numerarului.")
                 Text("• BankNews: reper comparativ pentru cursurile bancare.")
@@ -139,34 +139,50 @@ private fun NumberField(label: String, value: String, onValue: (String) -> Unit)
 }
 
 private fun fetchBnr(): Pair<List<BnrRate>, String> {
-    val connection = URL("https://www.bnr.ro/nbrfxrates.xml").openConnection()
-    connection.connectTimeout = 12000
-    connection.readTimeout = 12000
-    connection.setRequestProperty("User-Agent", "SchimbValutarByMisculae/1.0")
-    val parser = XmlPullParserFactory.newInstance().newPullParser()
-    connection.getInputStream().use { parser.setInput(it, "UTF-8") }
-    var date = ""
-    val rates = mutableListOf<BnrRate>()
-    var currentCode: String? = null
-    var inRate = false
-    var event = parser.eventType
-    while (event != XmlPullParser.END_DOCUMENT) {
-        when (event) {
-            XmlPullParser.START_TAG -> when (parser.name) {
-                "Cube" -> date = parser.getAttributeValue(null, "date") ?: date
-                "Rate" -> { currentCode = parser.getAttributeValue(null, "currency"); inRate = true }
-            }
-            XmlPullParser.TEXT -> if (inRate && currentCode != null) {
-                val value = parser.text.trim().replace(',', '.').toDoubleOrNull()
-                if (value != null) rates += BnrRate(currentCode!!, value)
-            }
-            XmlPullParser.END_TAG -> if (parser.name == "Rate") { currentCode = null; inRate = false }
-        }
-        event = parser.next()
+    val connection = (URL("https://curs.bnr.ro/nbrfxrates.xml").openConnection() as HttpURLConnection).apply {
+        connectTimeout = 15000
+        readTimeout = 15000
+        requestMethod = "GET"
+        setRequestProperty("User-Agent", "Mozilla/5.0 (Android) SchimbValutarByMisculae/1.0")
+        setRequestProperty("Accept", "application/xml,text/xml,*/*")
     }
-    val normalizedDate = try {
-        val d = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(date)
-        SimpleDateFormat("dd.MM.yyyy", Locale("ro", "RO")).format(d!!)
-    } catch (_: Exception) { date.ifBlank { "necunoscută" } }
-    return rates.sortedBy { it.code } to normalizedDate
+    try {
+        val code = connection.responseCode
+        if (code !in 200..299) throw IllegalStateException("Serverul BNR a răspuns cu HTTP $code")
+        val parser = XmlPullParserFactory.newInstance().newPullParser()
+        connection.inputStream.use { parser.setInput(it, "UTF-8") }
+        var date = ""
+        val rates = mutableMapOf<String, Double>()
+        var currentCode: String? = null
+        var multiplier = 1.0
+        var event = parser.eventType
+        while (event != XmlPullParser.END_DOCUMENT) {
+            when (event) {
+                XmlPullParser.START_TAG -> when (parser.name.substringAfter(':')) {
+                    "Cube" -> date = parser.getAttributeValue(null, "date") ?: date
+                    "Rate" -> {
+                        currentCode = parser.getAttributeValue(null, "currency")
+                        multiplier = parser.getAttributeValue(null, "multiplier")?.toDoubleOrNull() ?: 1.0
+                    }
+                }
+                XmlPullParser.TEXT, XmlPullParser.CDSECT -> if (currentCode != null) {
+                    val value = parser.text.trim().replace(',', '.').toDoubleOrNull()
+                    if (value != null) rates[currentCode!!] = value / multiplier
+                }
+                XmlPullParser.END_TAG -> if (parser.name.substringAfter(':') == "Rate") {
+                    currentCode = null
+                    multiplier = 1.0
+                }
+            }
+            event = parser.next()
+        }
+        if (rates.isEmpty() || date.isBlank()) throw IllegalStateException("Feed-ul XML nu conține cursuri sau data publicării.")
+        val normalizedDate = try {
+            val d = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(date)
+            SimpleDateFormat("dd.MM.yyyy", Locale("ro", "RO")).format(d!!)
+        } catch (_: Exception) { date }
+        return rates.map { BnrRate(it.key, it.value) }.sortedBy { it.code } to normalizedDate
+    } finally {
+        connection.disconnect()
+    }
 }
