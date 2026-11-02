@@ -34,96 +34,113 @@ private data class BnrRate(val code: String, val value: Double)
 
 @Composable
 private fun ExchangeApp() {
-    var amount by remember { mutableStateOf("5000") }
-    var btPercent by remember { mutableStateOf("0.9") }
-    var revolutFee by remember { mutableStateOf("18") }
-    var revolutRate by remember { mutableStateOf("") }
-    var bankRate by remember { mutableStateOf("") }
-    var cashRate by remember { mutableStateOf("") }
+    var amount by remember { mutableStateOf("100") }
+    var selected by remember { mutableStateOf("USD") }
     var bnr by remember { mutableStateOf<List<BnrRate>>(emptyList()) }
-    var bnrDate by remember { mutableStateOf("Neactualizat") }
-    var message by remember { mutableStateOf("Cursurile comerciale se introduc/verifică din sursa afișată. Nu folosim cotații inventate.") }
-    var results by remember { mutableStateOf<List<Pair<String, Double>>>(emptyList()) }
+    var bnrDate by remember { mutableStateOf("Se încarcă…") }
+    var message by remember { mutableStateOf("Se preiau automat cursurile oficiale BNR.") }
+    var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    fun calculate() {
-        val usd = amount.toDoubleOrNull() ?: 0.0
-        val btFee = btPercent.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
-        val revFee = revolutFee.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
-        val out = mutableListOf<Pair<String, Double>>()
-        val bRate = bankRate.toDoubleOrNull()
-        val cRate = cashRate.toDoubleOrNull()
-        val rRate = revolutRate.toDoubleOrNull()
-        if (bRate != null && bRate > 0) out += "Bancă – schimb în cont" to usd * bRate
-        if (cRate != null && cRate > 0) out += "Casă de schimb – numerar BT" to (usd * (1.0 - btFee / 100.0)) * cRate
-        if (rRate != null && rRate > 0 && usd > revFee) out += "Revolut – transfer USD" to (usd - revFee) * rRate
-        results = out.sortedByDescending { it.second }
-        message = if (out.isEmpty()) "Introdu cel puțin un curs de cumpărare USD pentru a calcula." else "Rezultatele folosesc cursurile introduse de tine; verifică disponibilitatea și comisioanele înainte de tranzacție."
+    fun refresh() {
+        scope.launch {
+            loading = true
+            message = "Se preiau cursurile BNR…"
+            try {
+                val pair = withContext(Dispatchers.IO) { fetchBnr() }
+                bnr = pair.first.filter { it.code in setOf("USD", "EUR", "GBP", "XAU") }
+                bnrDate = pair.second
+                val missing = listOf("USD", "EUR", "GBP", "XAU").filter { code -> bnr.none { it.code == code } }
+                message = if (missing.isEmpty()) "Cursurile au fost actualizate automat." else "BNR nu a publicat în acest feed: ${missing.joinToString()}"
+            } catch (e: Exception) {
+                message = "Eroare BNR: ${e.localizedMessage ?: e.javaClass.simpleName}"
+            } finally {
+                loading = false
+            }
+        }
     }
 
+    LaunchedEffect(Unit) { refresh() }
+
+    val currentRate = bnr.firstOrNull { it.code == selected }?.value
+    val numericAmount = amount.replace(',', '.').toDoubleOrNull()
+    val converted = if (currentRate != null && numericAmount != null) numericAmount * currentRate else null
+
     Scaffold { padding ->
-        LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyColumn(
+            Modifier.fillMaxSize().padding(padding).padding(horizontal = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             item {
                 Spacer(Modifier.height(12.dp))
                 Text("Schimb Valutar", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text("by Misculae · București", color = MaterialTheme.colorScheme.primary)
-                Text("Compară cât primești NET în lei, nu doar cursul afișat.")
+                Text("by Misculae · cursuri oficiale BNR", color = MaterialTheme.colorScheme.primary)
+                Text("Conversie automată în lei, folosind cursul BNR publicat.")
             }
             item {
-                SectionTitle("CALCULATOR USD → RON")
-                NumberField("Suma în USD", amount) { amount = it }
-                NumberField("Comision retragere BT (%)", btPercent) { btPercent = it }
-                NumberField("Comision transfer Revolut (USD)", revolutFee) { revolutFee = it }
-                NumberField("Curs bancă: cumpărare USD (RON)", bankRate) { bankRate = it }
-                NumberField("Curs casă schimb: cumpărare USD (RON)", cashRate) { cashRate = it }
-                NumberField("Curs Revolut USD → RON", revolutRate) { revolutRate = it }
-                Button(onClick = { calculate() }, modifier = Modifier.fillMaxWidth()) { Text("CALCULEAZĂ ACUM") }
+                SectionTitle("CONVERTOR VALUTAR")
+                Text("Alege valuta")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("USD", "EUR", "GBP", "XAU").forEach { code ->
+                        FilterChip(
+                            selected = selected == code,
+                            onClick = { selected = code },
+                            label = { Text(code) }
+                        )
+                    }
+                }
+                NumberField(if (selected == "XAU") "Cantitate în grame" else "Suma în $selected", amount) { amount = it }
+                Text(
+                    when (selected) {
+                        "XAU" -> "1 gram aur (BNR)"
+                        else -> "1 $selected"
+                    },
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    currentRate?.let { String.format(Locale.US, "%.4f RON", it) } ?: "Curs indisponibil",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Divider()
+                Text("REZULTAT ÎN LEI", fontWeight = FontWeight.Bold)
+                Text(
+                    converted?.let { String.format(Locale("ro", "RO"), "%,.2f RON", it) } ?: "Așteaptă cursul BNR sau introdu o sumă validă.",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text("Calculul se actualizează automat când schimbi suma sau valuta.")
+            }
+            item {
+                SectionTitle("CURSURI BNR")
+                Text("Data cursului: $bnrDate")
+                Button(onClick = { refresh() }, enabled = !loading, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (loading) "SE ACTUALIZEAZĂ…" else "ACTUALIZEAZĂ CURSURILE")
+                }
                 Text(message, style = MaterialTheme.typography.bodySmall)
             }
-            item { SectionTitle("CLASAMENT – LEI NET") }
-            if (results.isEmpty()) item { Text("Completează unul sau mai multe cursuri și apasă CALCULEAZĂ.") }
-            items(results) { (name, value) ->
+            items(listOf("USD", "EUR", "GBP", "XAU")) { code ->
+                val rate = bnr.firstOrNull { it.code == code }
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(14.dp)) {
-                        Text(name, fontWeight = FontWeight.SemiBold)
-                        Text(String.format(Locale("ro", "RO"), "%,.2f RON", value), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            }
-            item {
-                SectionTitle("CURS OFICIAL BNR")
-                Text("Sursa oficială: curs.bnr.ro · curs de referință, nu ofertă garantată de schimb.")
-                Text("Data: $bnrDate")
-                Button(onClick = {
-                    scope.launch {
-                        message = "Se preia cursul BNR…"
-                        try {
-                            val pair = withContext(Dispatchers.IO) { fetchBnr() }
-                            bnr = pair.first
-                            bnrDate = pair.second
-                            message = "Curs BNR actualizat. Cotațiile comerciale se verifică separat."
-                        } catch (e: Exception) {
-                            message = "Eroare BNR: ${e.localizedMessage ?: e.javaClass.simpleName}"
+                    Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text(if (code == "XAU") "Aur – gram" else code, fontWeight = FontWeight.SemiBold)
+                            Text(if (code == "XAU") "Preț oficial gram aur" else "Curs oficial BNR")
                         }
+                        Text(
+                            rate?.let { String.format(Locale.US, "%.4f RON", it.value) } ?: "—",
+                            style = MaterialTheme.typography.titleMedium
+                        )
                     }
-                }) { Text("ACTUALIZEAZĂ CURS BNR") }
-            }
-            items(bnr) { rate ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(rate.code, fontWeight = FontWeight.SemiBold)
-                    Text(String.format(Locale.US, "%.4f RON", rate.value))
                 }
             }
             item {
-                SectionTitle("SURSE ȘI VERIFICĂRI")
-                Text("• BNR: XML oficial – https://curs.bnr.ro/nbrfxrates.xml")
-                Text("• Bănci: verifică rubrica «cumpărare USD»; condițiile pot depinde de pachet și canal.")
-                Text("• Case de schimb: Valutare.ro – confirmă telefonic cursul, suma acceptată și existența numerarului.")
-                Text("• BankNews: reper comparativ pentru cursurile bancare.")
-                Text("• Revolut: introdu cursul efectiv afișat în aplicația ta.")
-                Text("Valorile de comision sunt editabile. Taxa Revolut de 18 USD este doar valoarea ta implicită, nu o garanție universală.")
+                SectionTitle("IMPORTANT")
+                Text("Cursurile BNR sunt cursuri oficiale de referință, nu oferte garantate de cumpărare sau vânzare la bancă ori la casa de schimb.")
+                Text("Pentru comparația ofertelor comerciale și calculul câștigului net după comisioane vom folosi separat cursurile efective ale băncilor, caselor de schimb și Revolut.")
+                Text("Sursa: https://curs.bnr.ro/nbrfxrates.xml")
             }
-            item { Spacer(Modifier.height(28.dp)) }
+            item { Spacer(Modifier.height(24.dp)) }
         }
     }
 }
@@ -135,7 +152,10 @@ private fun SectionTitle(text: String) {
 
 @Composable
 private fun NumberField(label: String, value: String, onValue: (String) -> Unit) {
-    OutlinedTextField(value, onValue, label = { Text(label) }, modifier = Modifier.fillMaxWidth(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+    OutlinedTextField(
+        value, onValue, label = { Text(label) }, modifier = Modifier.fillMaxWidth(),
+        singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+    )
 }
 
 private fun fetchBnr(): Pair<List<BnrRate>, String> {
@@ -154,8 +174,6 @@ private fun fetchBnr(): Pair<List<BnrRate>, String> {
         val rates = mutableMapOf<String, Double>()
         var currentCode: String? = null
         var multiplier = 1.0
-        // Keep the HTTP stream open for the entire XML parse. Closing it immediately
-        // after setInput() causes XmlPullParser to fail later with "Stream is closed".
         connection.inputStream.buffered().use { input ->
             parser.setInput(input, "UTF-8")
             var event = parser.eventType
@@ -182,8 +200,8 @@ private fun fetchBnr(): Pair<List<BnrRate>, String> {
         }
         if (rates.isEmpty() || date.isBlank()) throw IllegalStateException("Feed-ul XML nu conține cursuri sau data publicării.")
         val normalizedDate = try {
-            val d = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(date)
-            SimpleDateFormat("dd.MM.yyyy", Locale("ro", "RO")).format(d!!)
+            val parsed = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(date)
+            SimpleDateFormat("dd.MM.yyyy", Locale("ro", "RO")).format(parsed!!)
         } catch (_: Exception) { date }
         return rates.map { BnrRate(it.key, it.value) }.sortedBy { it.code } to normalizedDate
     } finally {
