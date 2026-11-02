@@ -3,15 +3,12 @@ workflows:
     name: Schimb Valutar by Misculae
     max_build_duration: 60
     environment:
-      android_signing:
-        - android_keystore
       vars:
         PACKAGE_NAME: "ro.misculae.schimbvalutar"
       java: 17
     scripts:
       - name: Build debug APK
         script: |
-          chmod +x ./gradlew || true
           gradle --version
           gradle assembleDebug
     artifacts:
