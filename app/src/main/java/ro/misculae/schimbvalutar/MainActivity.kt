@@ -150,31 +150,35 @@ private fun fetchBnr(): Pair<List<BnrRate>, String> {
         val code = connection.responseCode
         if (code !in 200..299) throw IllegalStateException("Serverul BNR a răspuns cu HTTP $code")
         val parser = XmlPullParserFactory.newInstance().newPullParser()
-        connection.inputStream.use { parser.setInput(it, "UTF-8") }
         var date = ""
         val rates = mutableMapOf<String, Double>()
         var currentCode: String? = null
         var multiplier = 1.0
-        var event = parser.eventType
-        while (event != XmlPullParser.END_DOCUMENT) {
-            when (event) {
-                XmlPullParser.START_TAG -> when (parser.name.substringAfter(':')) {
-                    "Cube" -> date = parser.getAttributeValue(null, "date") ?: date
-                    "Rate" -> {
-                        currentCode = parser.getAttributeValue(null, "currency")
-                        multiplier = parser.getAttributeValue(null, "multiplier")?.toDoubleOrNull() ?: 1.0
+        // Keep the HTTP stream open for the entire XML parse. Closing it immediately
+        // after setInput() causes XmlPullParser to fail later with "Stream is closed".
+        connection.inputStream.buffered().use { input ->
+            parser.setInput(input, "UTF-8")
+            var event = parser.eventType
+            while (event != XmlPullParser.END_DOCUMENT) {
+                when (event) {
+                    XmlPullParser.START_TAG -> when (parser.name.substringAfter(':')) {
+                        "Cube" -> date = parser.getAttributeValue(null, "date") ?: date
+                        "Rate" -> {
+                            currentCode = parser.getAttributeValue(null, "currency")
+                            multiplier = parser.getAttributeValue(null, "multiplier")?.toDoubleOrNull() ?: 1.0
+                        }
+                    }
+                    XmlPullParser.TEXT, XmlPullParser.CDSECT -> if (currentCode != null) {
+                        val value = parser.text.trim().replace(',', '.').toDoubleOrNull()
+                        if (value != null) rates[currentCode!!] = value / multiplier
+                    }
+                    XmlPullParser.END_TAG -> if (parser.name.substringAfter(':') == "Rate") {
+                        currentCode = null
+                        multiplier = 1.0
                     }
                 }
-                XmlPullParser.TEXT, XmlPullParser.CDSECT -> if (currentCode != null) {
-                    val value = parser.text.trim().replace(',', '.').toDoubleOrNull()
-                    if (value != null) rates[currentCode!!] = value / multiplier
-                }
-                XmlPullParser.END_TAG -> if (parser.name.substringAfter(':') == "Rate") {
-                    currentCode = null
-                    multiplier = 1.0
-                }
+                event = parser.next()
             }
-            event = parser.next()
         }
         if (rates.isEmpty() || date.isBlank()) throw IllegalStateException("Feed-ul XML nu conține cursuri sau data publicării.")
         val normalizedDate = try {
