@@ -80,7 +80,7 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
     Field("Suma de schimbat",amount) { amount=it }
     Text("BNR "+currency+": "+(bnr[currency]?.let { rate(it)+" RON" } ?: "se încarcă"))
     Text("Actualizat: "+updated,style=MaterialTheme.typography.bodySmall)
-    Button(onClick={refresh},enabled=!loading,modifier=Modifier.fillMaxWidth()) { Text(if(loading) "SE ACTUALIZEAZĂ…" else "ACTUALIZEAZĂ CURSURILE") }
+    Button(onClick={refresh()},enabled=!loading,modifier=Modifier.fillMaxWidth()) { Text(if(loading) "SE ACTUALIZEAZĂ…" else "ACTUALIZEAZĂ CURSURILE") }
     Text(status,style=MaterialTheme.typography.bodySmall)
    }
    item {
