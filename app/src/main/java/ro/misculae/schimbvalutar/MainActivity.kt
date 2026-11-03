@@ -48,7 +48,7 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
   try {
    val data=withContext(Dispatchers.IO) { loadRates(currency) }
    bnr=data.bnr; offers=data.offers; updated=data.updated
-   status="Preluare reușită: "+data.offers.size+" oferte. BNR: "+if(data.bnr.isEmpty()) "indisponibil" else "OK"+". Unele surse pot lipsi temporar."
+   status="Preluare reușită: "+data.offers.size+" oferte. BNR: "+(if(data.bnr.isEmpty()) "indisponibil" else "OK")+". Unele surse pot lipsi temporar."
   } catch(e:Exception) { status="Eroare la preluarea datelor: "+(e.localizedMessage ?: e.javaClass.simpleName) }
   finally { loading=false }
  } }
