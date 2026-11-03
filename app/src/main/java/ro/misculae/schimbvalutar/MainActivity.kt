@@ -26,7 +26,7 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
  override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { MaterialTheme { ExchangeApp() } } }
 }
-private data class Offer(val name:String,val channel:String,val buy:Double,val updated:String,val source:String,val isBt:Boolean=false)
+private data class Offer(val name:String,val channel:String,val buy:Double,val updated:String,val source:String,val isBt:Boolean=false,val isRevolut:Boolean=false)
 private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,val updated:String)
 
 @Composable private fun ExchangeApp() {
@@ -37,10 +37,6 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
  var updated by remember { mutableStateOf("—") }
  var status by remember { mutableStateOf("Se încarcă sursele…") }
  var loading by remember { mutableStateOf(false) }
- var btFeeOn by remember { mutableStateOf(true) }
- var btPercent by remember { mutableStateOf("0.9") }
- var btMinimum by remember { mutableStateOf("0") }
- var revolutFee by remember { mutableStateOf("18") }
  var revolutRate by remember { mutableStateOf("") }
  val scope = rememberCoroutineScope()
  fun refresh() { scope.launch {
@@ -54,16 +50,19 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
  } }
  LaunchedEffect(currency) { refresh() }
  val qty=amount.replace(',','.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
- val pct=btPercent.replace(',','.').toDoubleOrNull() ?: 0.9
- val minFee=btMinimum.replace(',','.').toDoubleOrNull() ?: 0.0
- val feeUsd=revolutFee.replace(',','.').toDoubleOrNull() ?: 18.0
- val usdBnr=bnr["USD"] ?: 0.0
- val fixedFeeRon=feeUsd*usdBnr
- data class Result(val offer:Offer,val gross:Double,val fee:Double,val net:Double)
- val ranked=offers.map { o ->
+ val fixedFeeRon=18.0*(bnr["USD"] ?: 0.0)
+ val revolutValue=revolutRate.replace(',','.').toDoubleOrNull()
+ val allOffers=offers.toMutableList()
+ if(revolutValue!=null && revolutValue>0) allOffers.add(Offer("Revolut","Aplicația Revolut",revolutValue,"","Curs introdus din aplicație",isRevolut=true))
+ data class Result(val offer:Offer,val net:Double)
+ val ranked=allOffers.map { o ->
   val gross=qty*o.buy
-  val fee=if(o.isBt && btFeeOn) maxOf(gross*pct/100.0,minFee) else 0.0
-  Result(o,gross,fee,gross-fee)
+  val fee=when {
+   o.isBt -> 0.0
+   o.isRevolut -> fixedFeeRon
+   else -> gross*0.009
+  }
+  Result(o,gross-fee)
  }.filter { it.net>0 }.sortedByDescending { it.net }
  val best=ranked.firstOrNull()
  Scaffold { pad ->
@@ -84,17 +83,9 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
     Text(status,style=MaterialTheme.typography.bodySmall)
    }
    item {
-    Heading("2. COMISIOANE")
-    Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) { Checkbox(btFeeOn,{btFeeOn=it}); Text("Aplică retragerea numerar BT") }
-    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-     Column(Modifier.weight(1f)) { Field("BT comision %",btPercent){btPercent=it} }
-     Column(Modifier.weight(1f)) { Field("Minim lei (dacă se aplică)",btMinimum){btMinimum=it} }
-    }
-    Field("Revolut comision fix (USD)",revolutFee){revolutFee=it}
+    Heading("2. REVOLUT")
     Field("Curs Revolut RON / 1 "+currency+" (din aplicație)",revolutRate){revolutRate=it}
-    val rr=revolutRate.replace(',','.').toDoubleOrNull()
-    if(rr!=null && rr>0 && qty>0) Text("Revolut estimat: "+cash(qty*rr-fixedFeeRon)+" RON net (comision fix estimat "+cash(fixedFeeRon)+" RON)")
-    Text("Cursul Revolut trebuie introdus din aplicație: este personalizat și nu există o cotație publică garantată. Comisionul de 18 USD rămâne editabil.",style=MaterialTheme.typography.bodySmall)
+    Text("Introdu cursul afișat în aplicația Revolut. Oferta va apărea automat în clasament, cu toate costurile calculate.",style=MaterialTheme.typography.bodySmall)
    }
    item {
     Heading("3. CEA MAI BUNĂ OFERTĂ")
@@ -103,7 +94,7 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
       Text(best.offer.name,fontWeight=FontWeight.Bold,style=MaterialTheme.typography.titleLarge)
       Text(best.offer.channel+" · "+best.offer.source)
       Text(cash(best.net)+" RON",style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Bold)
-      Text("Curs "+rate(best.offer.buy)+" · comision "+cash(best.fee)+" RON")
+      Text("Curs "+rate(best.offer.buy)+" RON pentru 1 "+currency)
      }
     } else Text("Nu există încă oferte disponibile.")
    }
@@ -113,7 +104,7 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
      Text(r.offer.name,fontWeight=FontWeight.SemiBold)
      Text(r.offer.channel+" · "+r.offer.source,style=MaterialTheme.typography.bodySmall)
      Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) { Text("Curs "+rate(r.offer.buy)); Text(cash(r.net)+" RON",fontWeight=FontWeight.Bold) }
-     Text("Brut "+cash(r.gross)+" · comision "+cash(r.fee)+" RON",style=MaterialTheme.typography.bodySmall)
+
      if(r.offer.updated.isNotBlank()) Text("Actualizat: "+r.offer.updated,style=MaterialTheme.typography.labelSmall)
     } }
    }
@@ -121,7 +112,7 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
     Heading("SURSE ȘI NOTE")
     Text("Bănci: cursuri publice agregate (cursdevaluta.ro, 13 instituții). Case de schimb: Valutare.ro – București. Curs oficial: BNR.")
     Text("Ofertele de la case pot avea praguri minime și disponibilitate limitată. Verifică telefonic înainte de deplasare.")
-    Text("BT: comisionul de retragere este aplicat separat, cu procent și minim configurabile. Cursul din cont diferă de cel de la ghișeu.")
+    Text("La ofertele din afara BT este inclus automat costul retragerii numerarului de la BT. La schimbul făcut direct la BT acest cost nu se scade. La Revolut se include comisionul aferent.")
     Text("Revolut: cursul și comisionul depind de plan, plafonul lunar și momentul schimbului.")
     Text("Surse live: cursdevaluta.ro/api (BNR + bănci) și Valutare.ro (case de schimb București). BankNews.ro și Revolut pot fi consultate separat pentru verificarea ofertelor și condițiilor.")
     Spacer(Modifier.height(24.dp))
