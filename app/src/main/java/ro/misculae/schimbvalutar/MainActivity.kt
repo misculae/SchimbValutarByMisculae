@@ -39,7 +39,7 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
  var loading by remember { mutableStateOf(false) }
  var btFeeOn by remember { mutableStateOf(true) }
  var btPercent by remember { mutableStateOf("0.9") }
- var btMinimum by remember { mutableStateOf("9") }
+ var btMinimum by remember { mutableStateOf("0") }
  var revolutFee by remember { mutableStateOf("18") }
  var revolutRate by remember { mutableStateOf("") }
  val scope = rememberCoroutineScope()
@@ -55,7 +55,7 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
  LaunchedEffect(currency) { refresh() }
  val qty=amount.replace(',','.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
  val pct=btPercent.replace(',','.').toDoubleOrNull() ?: 0.9
- val minFee=btMinimum.replace(',','.').toDoubleOrNull() ?: 9.0
+ val minFee=btMinimum.replace(',','.').toDoubleOrNull() ?: 0.0
  val feeUsd=revolutFee.replace(',','.').toDoubleOrNull() ?: 18.0
  val usdBnr=bnr["USD"] ?: 0.0
  val fixedFeeRon=feeUsd*usdBnr
@@ -88,7 +88,7 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
     Row(verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) { Checkbox(btFeeOn,{btFeeOn=it}); Text("Aplică retragerea numerar BT") }
     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
      Column(Modifier.weight(1f)) { Field("BT comision %",btPercent){btPercent=it} }
-     Column(Modifier.weight(1f)) { Field("Minim lei",btMinimum){btMinimum=it} }
+     Column(Modifier.weight(1f)) { Field("Minim lei (dacă se aplică)",btMinimum){btMinimum=it} }
     }
     Field("Revolut comision fix (USD)",revolutFee){revolutFee=it}
     Field("Curs Revolut RON / 1 "+currency+" (din aplicație)",revolutRate){revolutRate=it}
