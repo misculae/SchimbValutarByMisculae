@@ -49,9 +49,10 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
   finally { loading=false }
  } }
  LaunchedEffect(currency) { refresh() }
- val qty=amount.replace(',','.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+ val qty=parseDecimal(amount)?.coerceAtLeast(0.0) ?: 0.0
  val fixedFeeRon=18.0*(bnr["USD"] ?: 0.0)
- val revolutValue=revolutRate.replace(',','.').toDoubleOrNull()
+ val revolutValue=parseDecimal(revolutRate)
+ val revolutNet=if(revolutValue!=null && revolutValue>0 && qty>0) qty*revolutValue-fixedFeeRon else null
  val allOffers=offers.toMutableList()
  if(revolutValue!=null && revolutValue>0) allOffers.add(Offer("Revolut","Aplicația Revolut",revolutValue,"","Curs introdus din aplicație",isRevolut=true))
  data class Result(val offer:Offer,val net:Double)
@@ -85,7 +86,13 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
    item {
     Heading("2. REVOLUT")
     Field("Curs Revolut RON / 1 "+currency+" (din aplicație)",revolutRate){revolutRate=it}
-    Text("Introdu cursul afișat în aplicația Revolut. Oferta va apărea automat în clasament, cu toate costurile calculate.",style=MaterialTheme.typography.bodySmall)
+    Text("Introdu cursul afișat în aplicația Revolut. Oferta va apărea automat în clasament.",style=MaterialTheme.typography.bodySmall)
+    if(revolutNet!=null) Card(Modifier.fillMaxWidth()) {
+     Column(Modifier.padding(12.dp)) {
+      Text("REVOLUT – SUMĂ NETĂ")
+      Text(cash(revolutNet)+" RON",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)
+     }
+    }
    }
    item {
     Heading("3. CEA MAI BUNĂ OFERTĂ")
@@ -135,16 +142,47 @@ private fun fetchBnr():Map<String,Double> {
  return listOf("USD","EUR","GBP").mapNotNull { c -> val v=rates.optDouble(c,Double.NaN); if(v.isFinite()&&v>0) c to v else null }.toMap()
 }
 private fun fetchBanks(currency:String):List<Offer> {
- val root=JSONObject(getText("https://cursdevaluta.ro/api/bank-rates"))
- val arr=root.optJSONObject("currencies")?.optJSONArray(currency) ?: return emptyList()
  val out=mutableListOf<Offer>()
- for(i in 0 until arr.length()) {
-  val x=arr.optJSONObject(i) ?: continue
-  val buy=x.optDouble("buy",0.0); if(buy<=0) continue
-  val bank=x.optString("bank","Bancă")
-  out.add(Offer(bank,x.optString("channel","Bancă"),buy,root.optString("date",""),"Bănci · cursdevaluta.ro",bank.contains("Transilvania",true)))
+ runCatching {
+  val root=JSONObject(getText("https://cursdevaluta.ro/api/bank-rates"))
+  val arr=root.optJSONObject("currencies")?.optJSONArray(currency)
+  if(arr!=null) for(i in 0 until arr.length()) {
+   val x=arr.optJSONObject(i) ?: continue
+   val buy=x.optDouble("buy",0.0); if(buy<=0) continue
+   val bank=x.optString("bank",x.optString("name","Bancă"))
+   val channel=x.optString("channel",x.optString("type","Bancă"))
+   if(channel.contains("card",true)) continue
+   out.add(Offer(bank,channel,buy,root.optString("date",""),"Bănci · cursdevaluta.ro",bank.contains("Transilvania",true)))
+  }
  }
- return out
+ // BT Pay / internet banking: cotația oficială de schimb în cont, separată de ghișeu.
+ runCatching {
+  val bt=fetchBtInAccount(currency)
+  if(bt>0) {
+   out.removeAll { it.name.contains("Transilvania",true) && (it.channel.contains("cont",true) || it.channel.contains("app",true)) }
+   out.add(Offer("Banca Transilvania","BT Pay / schimb în cont",bt,"","Curs oficial BT – în cont / aplicație",isBt=true))
+  }
+ }
+ return out.distinctBy { (it.name+it.channel).lowercase(Locale.ROOT) }
+}
+
+private fun fetchBtInAccount(currency:String):Double {
+ val doc=Jsoup.parse(getText("https://www.bancatransilvania.ro/curs-valutar/in-cont"))
+ for(row in doc.select("tr")) {
+  val cells=row.select("td,th").map { it.text().trim() }
+  if(cells.isEmpty()) continue
+  val joined=cells.joinToString(" ")
+  if(!Regex("\\b"+currency+"\\b").containsMatchIn(joined)) continue
+  val numbers=Regex("\\d+[.,]\\d{3,6}").findAll(joined).mapNotNull { it.value.replace(',','.').toDoubleOrNull() }.toList()
+  if(numbers.size>=2) return numbers[1]
+ }
+ val text=doc.text()
+ val match=Regex("\\b"+currency+"\\b(?:\\s+[^0-9]{0,30})?(?:\\s+\\d+[.,]\\d{3,6}){2}").find(text)
+ if(match!=null) {
+  val numbers=Regex("\\d+[.,]\\d{3,6}").findAll(match.value).mapNotNull { it.value.replace(',','.').toDoubleOrNull() }.toList()
+  if(numbers.size>=2) return numbers[1]
+ }
+ return 0.0
 }
 private fun fetchExchanges(currency:String):List<Offer> {
  val slug=when(currency) { "USD"->"usd"; "EUR"->"eur"; else->"gbp" }
@@ -160,7 +198,15 @@ private fun fetchExchanges(currency:String):List<Offer> {
  }
  return out.distinctBy { it.name.lowercase(Locale.ROOT) }
 }
-private fun parseRate(s:String):Double=s.replace(",",".").replace(Regex("[^0-9.]"),"").toDoubleOrNull() ?: 0.0
+private fun parseRate(s:String):Double=parseDecimal(s) ?: 0.0
+private fun parseDecimal(raw:String):Double? {
+ val s=raw.trim().replace(" ","").replace("RON","").replace("lei","")
+ if(s.isBlank()) return null
+ val normalized=if(s.contains(',') && s.contains('.')) {
+  if(s.lastIndexOf(',')>s.lastIndexOf('.')) s.replace(".","").replace(',','.') else s.replace(",","")
+ } else s.replace(',','.')
+ return normalized.toDoubleOrNull()
+}
 private fun getText(address:String):String {
  val c=(URL(address).openConnection() as HttpURLConnection).apply {
   connectTimeout=18000; readTimeout=18000; requestMethod="GET"
