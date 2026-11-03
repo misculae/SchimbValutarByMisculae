@@ -48,7 +48,7 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
   try {
    val data=withContext(Dispatchers.IO) { loadRates(currency) }
    bnr=data.bnr; offers=data.offers; updated=data.updated
-   status="Actualizat: "+data.offers.size+" oferte. Băncile + casele de schimb."
+   status="Preluare reușită: "+data.offers.size+" oferte. BNR: "+if(data.bnr.isEmpty()) "indisponibil" else "OK"+". Unele surse pot lipsi temporar."
   } catch(e:Exception) { status="Eroare la preluarea datelor: "+(e.localizedMessage ?: e.javaClass.simpleName) }
   finally { loading=false }
  } }
@@ -119,11 +119,11 @@ private data class RatesData(val bnr:Map<String,Double>,val offers:List<Offer>,v
    }
    item {
     Heading("SURSE ȘI NOTE")
-    Text("Bănci: API cursuri bancare publice (13 instituții). Case de schimb: Valutare.ro – București. Curs oficial: BNR.")
+    Text("Bănci: cursuri publice agregate (cursdevaluta.ro, 13 instituții). Case de schimb: Valutare.ro – București. Curs oficial: BNR.")
     Text("Ofertele de la case pot avea praguri minime și disponibilitate limitată. Verifică telefonic înainte de deplasare.")
     Text("BT: comisionul de retragere este aplicat separat, cu procent și minim configurabile. Cursul din cont diferă de cel de la ghișeu.")
     Text("Revolut: cursul și comisionul depind de plan, plafonul lunar și momentul schimbului.")
-    Text("Surse: cursdevaluta.ro · valutare.ro · BankNews.ro · BNR · Revolut")
+    Text("Surse live: cursdevaluta.ro/api (BNR + bănci) și Valutare.ro (case de schimb București). BankNews.ro și Revolut pot fi consultate separat pentru verificarea ofertelor și condițiilor.")
     Spacer(Modifier.height(24.dp))
    }
   }
